@@ -1,0 +1,13 @@
+backend/bin/
+*.test
+*.out
+node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
