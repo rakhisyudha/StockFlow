@@ -21,8 +21,8 @@ to `stockflow/` in the layout above.
 ## Current state
 
 - `backend/` Go service with full product, stock and order lifecycle.
-- `frontend/` Vite React-TS scaffold, strict TypeScript, `/api` dev proxy configured.
-- `docker-compose.yml` reserved placeholder, filled in during the Docker part.
+- `frontend/` Vite React-TS scaffold, strict TypeScript, configurable `/api` dev proxy.
+- `docker-compose.yml` brings up Postgres + API with migrations and seed applied.
 
 ## Completed parts
 
@@ -32,28 +32,53 @@ to `stockflow/` in the layout above.
 4. **Stock adjustment + movement history**
 5a. **Order creation** (validation, server-side pricing, atomic decrements)
 5b. **Order detail + cancel** (stock restore)
+6. **Seed data + Docker Compose**
 
 ## Planned parts
 
-6. Seed data and Docker Compose
 7. Frontend foundations: shared types + API client + error envelope
 8. Frontend: products page, summary cards, adjust-stock modal
 9. Frontend: create order + order detail/cancel flows
-10. Frontend unit tests, docs polish, final verification
+10. Docs polish and final verification
 
 ## How to run
 
-```bash
-# backend (needs a reachable Postgres)
-cd backend
-export DATABASE_URL='postgres://stockflow:stockflow@localhost:5432/stockflow?sslmode=disable'
-go run ./cmd/api
+### Option A — one command (Docker)
 
-# frontend
-cd frontend && npm install && npm run dev
+```bash
+docker compose up -d --build
 ```
 
-Migrations are applied automatically on startup, so a fresh database is enough.
+This starts Postgres and the Go API. The API applies migrations and seed data on
+startup, so no manual DB step is needed.
+
+| Service | Host port | Notes |
+| --- | --- | --- |
+| Postgres | `5433` (override `PG_PORT`) | local 5432 is left free |
+| API | `8081` (override `API_PORT`) | local 8080 is left free |
+
+```bash
+curl http://localhost:8081/healthz
+curl 'http://localhost:8081/api/products?limit=3'
+```
+
+### Option B — local processes
+
+```bash
+# any reachable Postgres; on a fresh DB migrations + seed run at startup
+cd backend
+export DATABASE_URL='postgres://stockflow:stockflow@localhost:5432/stockflow?sslmode=disable'
+go run ./cmd/api            # listens on 8080 unless PORT is set
+
+cd ../frontend
+npm install
+cp .env.example .env        # VITE_API_TARGET defaults to http://localhost:8081
+npm run dev
+```
+
+Seed data: 14 realistic products (one with stock 6 for the low-stock filter),
+movement rows for a few of them, one `CREATED` order and one `CANCELLED` order.
+Seed SQL is idempotent, so restarting the API does not duplicate rows.
 
 ## API
 
@@ -63,7 +88,7 @@ Query parameters: `search` (matches `sku` or `name`, case-insensitive, literal
 `%`, `_` and `\` are escaped), `page` (>= 1, default 1), `limit` (1–100, default 20).
 
 ```bash
-curl 'http://localhost:8080/api/products?search=kopi&page=1&limit=20'
+curl 'http://localhost:8081/api/products?search=kopi&page=1&limit=20'
 ```
 
 ```json
@@ -102,7 +127,7 @@ A duplicate sku returns `409 SKU_ALREADY_EXISTS` with `{"sku":"..."}`. Success i
 `201` with the created product (`stock: 0`, `last_movement_at: null`).
 
 ```bash
-curl -X POST http://localhost:8080/api/products \
+curl -X POST http://localhost:8081/api/products \
   -H 'Content-Type: application/json' \
   -d '{"sku":"KOP-002","name":"Kopi Robusta","price":18000}'
 ```
@@ -120,7 +145,7 @@ Returns `204` with an empty body, `404 PRODUCT_NOT_FOUND` when missing, or
 never deleted.
 
 ```bash
-curl -i -X DELETE http://localhost:8080/api/products/1
+curl -i -X DELETE http://localhost:8081/api/products/1
 ```
 
 ### `POST /api/products/{id}/stock`
@@ -131,7 +156,7 @@ Body: `{"type":"in"|"out","qty":n,"note":"..."}`. `qty` must be an integer > 0;
 `{"product": {...}, "movement": {...}}`.
 
 ```bash
-curl -X POST http://localhost:8080/api/products/1/stock \
+curl -X POST http://localhost:8081/api/products/1/stock \
   -H 'Content-Type: application/json' \
   -d '{"type":"out","qty":3,"note":"picked for order"}'
 ```
@@ -169,7 +194,7 @@ returns `201` with the order (`status: "CREATED"`, `cancelled_at: null`) and ite
 carrying server-computed prices.
 
 ```bash
-curl -X POST http://localhost:8080/api/orders \
+curl -X POST http://localhost:8081/api/orders \
   -H 'Content-Type: application/json' \
   -d '{"customer":"Andi","items":[{"sku":"KOP-001","qty":2},{"sku":"TEH-001","qty":1}]}'
 ```
@@ -193,7 +218,7 @@ The status change and all restores are in one transaction, so a failed restore
 leaves the order active.
 
 ```bash
-curl -X POST http://localhost:8080/api/orders/1/cancel
+curl -X POST http://localhost:8081/api/orders/1/cancel
 ```
 
 ## Design decisions
@@ -201,7 +226,7 @@ curl -X POST http://localhost:8080/api/orders/1/cancel
 - **Migrations are embedded in the Go binary** (`//go:embed`) and applied through a
   `schema_migrations` table guarded by a Postgres advisory lock. *Trade-off:* the
   schema version is coupled to the binary (no external migration tool), but local
-  runs, tests and containers all share one source of truth and concurrent starts
+  runs and containers all share one source of truth and concurrent starts
   cannot double-apply.
 - **`last_movement_at` is derived**, via `LEFT JOIN stock_movements` + `MAX` in the
   list query. *Trade-off:* one extra join/aggregate per list request, but no
@@ -216,7 +241,7 @@ curl -X POST http://localhost:8080/api/orders/1/cancel
   server-side rather than leaked. New endpoints reuse this path unchanged.
 - **Fixed package pattern:** every domain gets `model + store + handler` in its own
   package, wired by `cmd/api`, routed by `internal/server`. *Trade-off:* more files
-  than a flat design, but predictable navigation and a clean seam for tests.
+  than a flat design, but predictable navigation and clear ownership per endpoint.
 - **Bounded pool and paging:** `pgxpool` capped at 1–10 connections and `limit`
   capped at 100. *Trade-off:* strict 400s for bad parameters instead of silent
   coercion, which prevents accidental unbounded scans.
@@ -265,29 +290,48 @@ curl -X POST http://localhost:8080/api/orders/1/cancel
   documented `409 PRODUCT_HAS_HISTORY`.
 - **`api.ParseID` is shared** by product and order handlers. *Trade-off:* one
   small shared function instead of two copies that could drift.
+- **Seeds are embedded SQL applied by the API**, not mounted into
+  `/docker-entrypoint-initdb.d`. *Trade-off:* the API must be running before data
+  exists, but schema and seed share the same versioned binary and the SQL is
+  idempotent — restarting never duplicates rows and there is no second copy of
+  the schema to keep in sync.
+- **Compose uses host ports 5433/8081** via variables. *Trade-off:* non-default
+  ports to remember; avoids colliding with an existing local Postgres or service
+  on 8080, and both are overridable with `PG_PORT` / `API_PORT`.
+- **API waits for a healthy Postgres** through `depends_on: condition: service_healthy`.
+  *Trade-off:* slightly slower startup; avoids crash-looping on a database that
+  is not accepting connections yet.
+- **Vite proxy target is configurable** through `VITE_API_TARGET`. *Trade-off:*
+  one extra env file; the same frontend works against the Compose API or a local
+  `go run` without code edits.
 
-## Tests
+## Verification (manual)
+
+There is no automated test suite; verification is done against the running stack.
+Build checks: `go vet ./... && go build ./...` in `backend/`, and
+`npm run build && npm run lint` in `frontend/`.
 
 ```bash
-cd backend
-go test ./...                                   # unit tests; DB test skips
-DATABASE_URL='postgres://...' go test ./... -count=1   # + httptest integration
+docker compose up -d --build
+
+curl http://localhost:8081/healthz
+curl 'http://localhost:8081/api/products?limit=3'
+curl -i 'http://localhost:8081/api/products?page=0'
+
+curl -X POST http://localhost:8081/api/orders \
+  -H 'Content-Type: application/json' \
+  -d '{"customer":"Andi","items":[{"sku":"KOP-001","qty":2}]}'
+
+curl -i -X POST http://localhost:8081/api/orders \
+  -H 'Content-Type: application/json' \
+  -d '{"customer":"Andi","items":[{"sku":"TEH-003","qty":99}]}'
+
+curl -X POST http://localhost:8081/api/orders/1/cancel
+curl http://localhost:8081/api/orders/1
 ```
 
-The integration tests use `TRUNCATE`, so point them at a disposable database.
-They cover list/search/validation, create/duplicate sku, update/404, the delete
-history guard, stock happy path, overdraw-with-nothing-written, movement ordering,
-and a 20-goroutine concurrent-decrement test (10 succeed, 10 get 409, stock ends
-at 0 with exactly 10 movements). Order tests cover all validation rules,
-server-computed totals, overdraw-with-nothing-written (no order, item or movement
-rows) and 20 concurrent orders against stock 10 (10 created, 10 rejected).
-Order detail/cancel tests cover exact stock restoration, double-cancel 409,
-missing order 404, 20 concurrent cancels restoring exactly once, and the delete
-guard for order-backed products.
-
-`go test -race` additionally checks for Go data races. It needs `CGO_ENABLED=1`
-and a C compiler; this Windows environment has neither gcc nor clang, so it could
-not be run here — the concurrency test itself passes with the race detector off.
+These cover the happy path, validation errors, insufficient stock, cancellation
+and stock restoration end to end.
 
 ## Improvements / honest hours
 

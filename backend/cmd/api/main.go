@@ -29,6 +29,9 @@ func main() {
 	if err := db.Migrate(ctx, pool); err != nil {
 		log.Fatalf("migrate: %v", err)
 	}
+	if err := db.Seed(ctx, pool); err != nil {
+		log.Fatalf("seed: %v", err)
+	}
 
 	products := product.NewHandler(product.NewStore(pool))
 	orders := order.NewHandler(order.NewStore(pool))
