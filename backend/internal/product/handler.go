@@ -73,3 +73,38 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (h *Handler) AdjustStock(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		api.WriteError(w, err)
+		return
+	}
+	in, err := decodeStockInput(w, r)
+	if err != nil {
+		api.WriteError(w, err)
+		return
+	}
+
+	result, err := h.store.AdjustStock(r.Context(), id, in)
+	if err != nil {
+		api.WriteError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) Movements(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		api.WriteError(w, err)
+		return
+	}
+
+	data, err := h.store.Movements(r.Context(), id)
+	if err != nil {
+		api.WriteError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, MovementListResponse{Data: data})
+}

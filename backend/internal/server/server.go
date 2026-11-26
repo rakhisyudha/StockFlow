@@ -14,6 +14,8 @@ func New(products *product.Handler) http.Handler {
 	mux.HandleFunc("POST /api/products", products.Create)
 	mux.HandleFunc("PUT /api/products/{id}", products.Update)
 	mux.HandleFunc("DELETE /api/products/{id}", products.Delete)
+	mux.HandleFunc("POST /api/products/{id}/stock", products.AdjustStock)
+	mux.HandleFunc("GET /api/products/{id}/movements", products.Movements)
 	return mux
 }
 

@@ -20,7 +20,7 @@ to `stockflow/` in the layout above.
 
 ## Current state
 
-- `backend/` Go service with product list/create/update/delete endpoints.
+- `backend/` Go service with product CRUD, stock adjustment and movement history.
 - `frontend/` Vite React-TS scaffold, strict TypeScript, `/api` dev proxy configured.
 - `docker-compose.yml` reserved placeholder, filled in during the Docker part.
 
@@ -29,17 +29,16 @@ to `stockflow/` in the layout above.
 1. **Boilerplate**
 2. **Database + first endpoint** (`GET /api/products`)
 3. **Product write endpoints** (create / update / delete)
+4. **Stock adjustment + movement history**
 
 ## Planned parts
 
-4. Stock adjustment + movement history
 5. Order endpoints + transactional stock safety
 6. Seed data and Docker Compose
-7. Backend concurrency tests
-8. Frontend foundations: shared types + API client + error envelope
-9. Frontend: products page, summary cards, adjust-stock modal
-10. Frontend: create order + order detail/cancel flows
-11. Frontend unit tests, docs polish, final verification
+7. Frontend foundations: shared types + API client + error envelope
+8. Frontend: products page, summary cards, adjust-stock modal
+9. Frontend: create order + order detail/cancel flows
+10. Frontend unit tests, docs polish, final verification
 
 ## How to run
 
@@ -123,6 +122,33 @@ never deleted.
 curl -i -X DELETE http://localhost:8080/api/products/1
 ```
 
+### `POST /api/products/{id}/stock`
+
+Body: `{"type":"in"|"out","qty":n,"note":"..."}`. `qty` must be an integer > 0;
+`type` must be `in` or `out`; `note` is optional. The stock change and the
+`stock_movements` row are written in one transaction. Success returns `200` with
+`{"product": {...}, "movement": {...}}`.
+
+```bash
+curl -X POST http://localhost:8080/api/products/1/stock \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"out","qty":3,"note":"picked for order"}'
+```
+
+Overdraw returns `409`:
+
+```json
+{"error": {"code": "INSUFFICIENT_STOCK", "message": "insufficient stock", "available": 2}}
+```
+
+Nothing is written on that path — no movement row, no stock change. Missing product
+returns `404 PRODUCT_NOT_FOUND`.
+
+### `GET /api/products/{id}/movements`
+
+Returns `{"data": [...]}` with movements newest first (`created_at DESC, id DESC`).
+`note` is `null` when omitted.
+
 ## Design decisions
 
 - **Migrations are embedded in the Go binary** (`//go:embed`) and applied through a
@@ -158,6 +184,15 @@ curl -i -X DELETE http://localhost:8080/api/products/1
   product row before checking movement history. *Trade-off:* one short lock per
   delete; prevents a concurrent movement from slipping in between the check and
   the delete, which would orphan history.
+- **Stock is changed by a guarded UPDATE**, never a read-then-write:
+  `UPDATE products SET stock = stock + $2 WHERE id = $1 AND stock + $2 >= 0
+  RETURNING stock`. *Trade-off:* one conditional statement instead of a simpler
+  SELECT/UPDATE pair; the database becomes the only arbiter of non-negative stock,
+  so concurrent requests cannot oversell. The row is locked with `FOR UPDATE`
+  **only on the failure path**, to report an accurate `available` value.
+- **Stock response carries both the product and the movement.** *Trade-off:* a
+  slightly larger body than a bare product; the UI can update stock and history
+  from one response instead of a second round trip.
 
 ## Tests
 
@@ -168,7 +203,14 @@ DATABASE_URL='postgres://...' go test ./... -count=1   # + httptest integration
 ```
 
 The integration tests use `TRUNCATE`, so point them at a disposable database.
-They cover create/validation/duplicate sku, update/404, and the delete history guard.
+They cover list/search/validation, create/duplicate sku, update/404, the delete
+history guard, stock happy path, overdraw-with-nothing-written, movement ordering,
+and a 20-goroutine concurrent-decrement test (10 succeed, 10 get 409, stock ends
+at 0 with exactly 10 movements).
+
+`go test -race` additionally checks for Go data races. It needs `CGO_ENABLED=1`
+and a C compiler; this Windows environment has neither gcc nor clang, so it could
+not be run here — the concurrency test itself passes with the race detector off.
 
 ## Improvements / honest hours
 
