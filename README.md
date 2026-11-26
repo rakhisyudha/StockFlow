@@ -2,129 +2,92 @@ This is a Fullstack technical test from iQuartz
 
 # StockFlow
 
-Warehouse supervisor app: manage products, adjust stock, and record stock-consuming
-sales orders. Go + PostgreSQL API, React + TypeScript UI.
+StockFlow is a small warehouse app. It manages products, stock and sales orders. The API is Go with PostgreSQL. The UI is React with TypeScript.
 
 ## Repository layout
 
 ```
 stockflow/
-├── backend/            # Go service (cmd/, internal/)
-├── frontend/           # React + TypeScript (Vite)
-├── docker-compose.yml  # Postgres + migrations + seed
+├── backend/            Go service with cmd and internal packages
+├── frontend/           React and TypeScript app built with Vite
+├── docker-compose.yml  Postgres and the Go API
 └── README.md
 ```
 
-In this checkout the repository root is the `StockFlow/` directory itself and maps
-to `stockflow/` in the layout above.
+This checkout uses the StockFlow folder as the repository root.
 
-## Current state
+## What is done
 
-- `backend/` Go service with full product, stock and order lifecycle.
-- `frontend/` full product, stock and order screens.
-- `docker-compose.yml` brings up Postgres + API with migrations and seed applied.
-
-## Completed parts
-
-1. **Boilerplate**
-2. **Database + first endpoint** (`GET /api/products`)
-3. **Product write endpoints** (create / update / delete)
-4. **Stock adjustment + movement history**
-5a. **Order creation** (validation, server-side pricing, atomic decrements)
-5b. **Order detail + cancel** (stock restore)
-6. **Seed data + Docker Compose**
-7. **Frontend foundations** (shared types, API client, app shell)
-8. **Products page** (summary, filters, search, stock adjustment)
-9. **Order screens** (create order, detail, cancel)
-
-## Planned parts
-
-10. Docs polish and final verification
+- Go API with product CRUD, stock changes, movement history and orders
+- PostgreSQL migrations and seed data applied when the API starts
+- React UI with a product table, summary cards, filters, a stock modal, an order form and order detail
+- Docker Compose for Postgres and the API
 
 ## How to run
 
-### Option A: one command (Docker)
+### Option one, Docker
+
+Run this from the repository root.
 
 ```bash
 docker compose up -d --build
 ```
 
-This starts Postgres and the Go API. The API applies migrations and seed data on
-startup, so no manual DB step is needed.
+Postgres and the API start together. The API applies migrations and seed data on startup, so there is no separate database step.
 
-| Service | Host port | Notes |
-| --- | --- | --- |
-| Postgres | `5433` (override `PG_PORT`) | local 5432 is left free |
-| API | `8081` (override `API_PORT`) | local 8080 is left free |
+Postgres uses host port 5433 because many machines already use 5432. The API uses host port 8081. You can change both with `PG_PORT` and `API_PORT`.
+
+Check that the stack works.
 
 ```bash
 curl http://localhost:8081/healthz
 curl 'http://localhost:8081/api/products?limit=3'
 ```
 
-### Option B: local processes
+### Option two, local processes
+
+Use any reachable Postgres. On a fresh database the API applies migrations and seed data at startup.
 
 ```bash
-# any reachable Postgres; on a fresh DB migrations + seed run at startup
 cd backend
 export DATABASE_URL='postgres://stockflow:stockflow@localhost:5432/stockflow?sslmode=disable'
-go run ./cmd/api            # listens on 8080 unless PORT is set
+go run ./cmd/api
+```
 
+The Go server listens on 8080 unless you set `PORT`. Then start the UI.
+
+```bash
 cd ../frontend
 npm install
-cp .env.example .env        # VITE_API_TARGET defaults to http://localhost:8081
+cp .env.example .env
 npm run dev
 ```
 
-Seed data: 14 realistic products (one with stock 6 for the low-stock filter),
-movement rows for a few of them, one `CREATED` order and one `CANCELLED` order.
-Seed SQL is idempotent, so restarting the API does not duplicate rows.
+The example env file points `VITE_API_TARGET` at http://localhost:8081 for the Docker setup. If the API runs locally on 8080, change that value to http://localhost:8080. The browser only calls relative `/api` paths and Vite forwards them during development.
+
+The seed has 14 products and two orders. One product has stock 6 so the low stock filter shows something. The seed SQL is idempotent, so restarting the API does not add rows twice.
 
 ## API
 
-### `GET /api/products`
+All responses use JSON. Errors use one shape everywhere.
 
-Query parameters: `search` (matches `sku` or `name`, case-insensitive, literal
-`%`, `_` and `\` are escaped), `page` (>= 1, default 1), `limit` (1 to 100, default 20).
+```json
+{"error": {"code": "BAD_REQUEST", "message": "validation failed", "details": ["sku is required"]}}
+```
+
+### GET /api/products
+
+The query parameters are `search`, `page` and `limit`. Search matches sku or name without case sensitivity. Page starts at 1. Limit goes from 1 to 100 and defaults to 20. Each product has `last_movement_at` as an ISO string or null.
 
 ```bash
 curl 'http://localhost:8081/api/products?search=kopi&page=1&limit=20'
 ```
 
-```json
-{
-  "data": [
-    {
-      "id": 1,
-      "sku": "KOP-001",
-      "name": "Kopi Arabika",
-      "price": 25000,
-      "stock": 50,
-      "is_active": true,
-      "created_at": "2026-11-26T07:23:33.123456Z",
-      "last_movement_at": "2026-11-26T07:23:33.123456Z"
-    }
-  ],
-  "page": 1,
-  "limit": 20,
-  "total": 1
-}
-```
+The response carries `data`, `page`, `limit` and `total`. Invalid paging returns 400.
 
-Invalid paging returns `400` with the shared error envelope:
+### POST /api/products
 
-```json
-{"error": {"code": "BAD_REQUEST", "message": "limit must be an integer between 1 and 100"}}
-```
-
-### `POST /api/products`
-
-Body: `{"sku":"...","name":"...","price":n,"is_active":true}`. `sku` and `name` are
-required after trimming, `price` must be an integer >= 0, `is_active` defaults to
-`true`. Unknown fields are rejected with `400 BAD_REQUEST`; field problems are
-returned as `{"error":{"code":"BAD_REQUEST","message":"validation failed","details":[...]}}`.
-A duplicate sku returns `409 SKU_ALREADY_EXISTS` with `{"sku":"..."}`. Success is
-`201` with the created product (`stock: 0`, `last_movement_at: null`).
+The body carries `sku`, `name`, `price` and an optional `is_active`. The sku and name are required after trimming. Price must be an integer of zero or more. Unknown fields return 400. A duplicate sku returns 409 with code `SKU_ALREADY_EXISTS`. Success returns 201 and the new product.
 
 ```bash
 curl -X POST http://localhost:8081/api/products \
@@ -132,28 +95,17 @@ curl -X POST http://localhost:8081/api/products \
   -d '{"sku":"KOP-002","name":"Kopi Robusta","price":18000}'
 ```
 
-### `PUT /api/products/{id}`
+### PUT /api/products/{id}
 
-Same body as create. `is_active` may be omitted to keep the current value.
-Returns `200` with the updated product, `404 PRODUCT_NOT_FOUND` when missing,
-or the same validation/duplicate errors as create.
+This uses the same body. Leaving out `is_active` keeps the current value. A missing product returns 404 with code `PRODUCT_NOT_FOUND`.
 
-### `DELETE /api/products/{id}`
+### DELETE /api/products/{id}
 
-Returns `204` with an empty body, `404 PRODUCT_NOT_FOUND` when missing, or
-`409 PRODUCT_HAS_HISTORY` when any movement references the product. History is
-never deleted.
+This returns 204 and an empty body. A product with movement history or order items returns 409 with code `PRODUCT_HAS_HISTORY`. History is never deleted.
 
-```bash
-curl -i -X DELETE http://localhost:8081/api/products/1
-```
+### POST /api/products/{id}/stock
 
-### `POST /api/products/{id}/stock`
-
-Body: `{"type":"in"|"out","qty":n,"note":"..."}`. `qty` must be an integer > 0;
-`type` must be `in` or `out`; `note` is optional. The stock change and the
-`stock_movements` row are written in one transaction. Success returns `200` with
-`{"product": {...}, "movement": {...}}`.
+The body carries `type`, `qty` and an optional `note`. Type is `in` or `out` and qty is an integer above zero. The stock change and the movement row are written in one transaction. Success returns 200 with the product and the movement. An overdraw returns 409 with the available quantity and writes nothing.
 
 ```bash
 curl -X POST http://localhost:8081/api/products/1/stock \
@@ -161,37 +113,13 @@ curl -X POST http://localhost:8081/api/products/1/stock \
   -d '{"type":"out","qty":3,"note":"picked for order"}'
 ```
 
-Overdraw returns `409`:
+### GET /api/products/{id}/movements
 
-```json
-{"error": {"code": "INSUFFICIENT_STOCK", "message": "insufficient stock", "available": 2}}
-```
+This returns `data` with movements newest first. Note is null when the caller did not send one.
 
-Nothing is written on that path: no movement row and no stock change. Missing product
-returns `404 PRODUCT_NOT_FOUND`.
+### POST /api/orders
 
-### `GET /api/products/{id}/movements`
-
-Returns `{"data": [...]}` with movements newest first (`created_at DESC, id DESC`).
-`note` is `null` when omitted.
-
-### `POST /api/orders`
-
-Body: `{"customer":"...","items":[{"sku":"...","qty":n}]}`. Prices are never
-accepted from the client. A `unit_price` field is rejected as unknown.
-
-Validation runs before any write: customer required, at least one item, every qty
-an integer > 0, no duplicate skus, every sku must exist. Problems return
-`400 BAD_REQUEST` with a `details` array, e.g.:
-
-```json
-{"error": {"code": "BAD_REQUEST", "message": "validation failed", "details": ["duplicate sku KOP-001"]}}
-```
-
-`unit_price` is read from `products` and `total` is computed server-side. All
-decrements, the order row and its item rows are written in one transaction. Success
-returns `201` with the order (`status: "CREATED"`, `cancelled_at: null`) and items
-carrying server-computed prices.
+The body carries `customer` and `items` with `sku` and `qty`. The client never sends a price. Validation runs before any write and returns 400 with details when something is wrong. Unit prices come from products and the server computes the total. All decrements, the order and its items are written in one transaction. Success returns 201 with the order and its items.
 
 ```bash
 curl -X POST http://localhost:8081/api/orders \
@@ -199,182 +127,93 @@ curl -X POST http://localhost:8081/api/orders \
   -d '{"customer":"Andi","items":[{"sku":"KOP-001","qty":2},{"sku":"TEH-001","qty":1}]}'
 ```
 
-If any item is short, nothing is written and the failing sku is identified:
+If one item is short, the API returns 409 with the sku and available quantity and nothing is written.
 
-```json
-{"error": {"code": "INSUFFICIENT_STOCK", "message": "insufficient stock", "sku": "GULA-001", "available": 3}}
-```
+### GET /api/orders/{id}
 
-### `GET /api/orders/{id}`
+This returns the order with items, status, total and `cancelled_at`. A missing order returns 404.
 
-Returns the order with items, status, total and `cancelled_at`. `404 ORDER_NOT_FOUND`
-when missing, `400 BAD_REQUEST` for a non-numeric id.
+### POST /api/orders/{id}/cancel
 
-### `POST /api/orders/{id}/cancel`
+This restores every item to stock and returns the cancelled order. A second cancel returns 409 with code `ORDER_ALREADY_CANCELLED`. The status change and all restores are in one transaction.
 
-Restores every item's quantity to stock and returns `200` with the cancelled order.
-`409 ORDER_ALREADY_CANCELLED` on a second cancel, `404 ORDER_NOT_FOUND` when missing.
-The status change and all restores are in one transaction, so a failed restore
-leaves the order active.
+## Frontend code
 
-```bash
-curl -X POST http://localhost:8081/api/orders/1/cancel
-```
-
-## Frontend architecture
-
-- `src/api/types.ts` holds every server shape in one module. Domain data is typed, never `any`.
-- `src/api/client.ts` is the only place that calls `fetch` or builds a URL. It returns
-  typed results and throws `ApiError` for every non-2xx response.
-- `src/lib/format.ts` holds `formatPrice` (`Rp 1.234.567`) and `formatRelativeTime`
-  (`2h ago`), shared by the pages.
-- `src/components/AppShell.tsx` and `src/pages/` define routes `/`, `/orders/new` and
-  `/orders/:id`.
-- `src/pages/ProductsPage.tsx` loads products and renders `SummaryCards`,
-  `ProductTable` and `AdjustStockModal`. Search and filters are client-side over
-  the loaded list.
-- `src/pages/NewOrderPage.tsx` manages a customer name and a list of SKU/qty rows,
-  then navigates to the created order.
-- `src/pages/OrderDetailPage.tsx` shows order items, status and total, and handles
-  cancellation after a confirm dialog.
+- `src/api/types.ts` holds every server shape in one module and domain data is never typed as `any`.
+- `src/api/client.ts` is the only place that calls `fetch` or builds a URL. It throws `ApiError` for every non ok response.
+- `ApiError` carries `status`, `code`, `message`, `details`, `available` and `sku` so a component can show field level feedback.
+- `src/lib/format.ts` formats prices and relative times.
+- `ProductsPage` loads products and renders summary cards, filters, the table and the stock modal.
+- `NewOrderPage` manages a customer and a list of SKU and qty rows. It highlights the row that failed with 409.
+- `OrderDetailPage` shows items, status and total. It cancels after a confirm dialog and links back to products.
 
 ## Design decisions
 
-- **Migrations are embedded in the Go binary** (`//go:embed`) and applied through a
-  `schema_migrations` table guarded by a Postgres advisory lock. *Trade-off:* the
-  schema version is coupled to the binary (no external migration tool), but local
-  runs and containers all share one source of truth and concurrent starts
-  cannot double-apply.
-- **`last_movement_at` is derived**, via `LEFT JOIN stock_movements` + `MAX` in the
-  list query. *Trade-off:* one extra join/aggregate per list request, but no
-  duplicated state and no second write path that could drift. Revisit with a
-  maintained column only if list latency becomes a problem.
-- **Search escapes LIKE wildcards** and uses unanchored `ILIKE`. *Trade-off:* simple
-  and correct for literal user input, but a btree index cannot help. A `pg_trgm`
-  GIN index is the upgrade path if the catalogue grows.
-- **One error pipeline:** `apierr.Error` is transport-neutral and carries
-  status/code/message/extra fields; `api.WriteError` is the only place that builds
-  `{"error": {...}}`. Unknown errors become `INTERNAL_ERROR` and are logged
-  server-side rather than leaked. New endpoints reuse this path unchanged.
-- **Fixed package pattern:** every domain gets `model + store + handler` in its own
-  package, wired by `cmd/api`, routed by `internal/server`. *Trade-off:* more files
-  than a flat design, but predictable navigation and clear ownership per endpoint.
-- **Bounded pool and paging:** `pgxpool` capped at 1 to 10 connections and `limit`
-  capped at 100. *Trade-off:* strict 400s for bad parameters instead of silent
-  coercion, which prevents accidental unbounded scans.
-- **One shared input decoder** for create/update: trims strings, rejects unknown
-  fields, and collects validation problems into `details`. *Trade-off:* stricter
-  than a permissive decoder (a typo'd field is a 400), but bad writes cannot slip
-  through and both endpoints cannot drift apart.
-- **Uniqueness is enforced by the DB constraint**, then the `23505` error is mapped
-  to `409 SKU_ALREADY_EXISTS`. *Trade-off:* a pre-check would be simpler to read but
-  racy; the constraint is the single source of truth.
-- **Delete guards inside one transaction** with `SELECT ... FOR UPDATE` on the
-  product row before checking movement history. *Trade-off:* one short lock per
-  delete; prevents a concurrent movement from slipping in between the check and
-  the delete, which would orphan history.
-- **Stock is changed by a guarded UPDATE**, never a read-then-write:
-  `UPDATE products SET stock = stock + $2 WHERE id = $1 AND stock + $2 >= 0
-  RETURNING stock`. *Trade-off:* one conditional statement instead of a simpler
-  SELECT/UPDATE pair; the database becomes the only arbiter of non-negative stock,
-  so concurrent requests cannot oversell. The row is locked with `FOR UPDATE`
-  **only on the failure path**, to report an accurate `available` value.
-- **Stock response carries both the product and the movement.** *Trade-off:* a
-  slightly larger body than a bare product; the UI can update stock and history
-  from one response instead of a second round trip.
-- **Order validation is two-phase:** shape/duplicates in the handler, existence of
-  all skus via one `WHERE sku = ANY(...)` query in the store. Both run before any
-  write. *Trade-off:* one extra round trip inside the transaction; gains clear,
-  complete 400 messages and no half-created order.
-- **Order decrements reuse the same guarded UPDATE as manual stock adjustment.**
-  *Trade-off:* duplicated SQL text instead of a shared helper; keeps each store's
-  transaction boundary explicit, and both paths inherit the same non-negative
-  guarantee. A shared helper is the cleanup candidate if a third writer appears.
-- **`DisallowUnknownFields` moved to `api.DecodeJSON`** and is shared by product
-  and order domains. *Trade-off:* strict input contracts; a client-sent
-  `unit_price` or typo'd field fails loudly instead of being silently ignored.
-- **Cancel is guarded by `WHERE status = 'CREATED'`**, not a read-then-write.
-  *Trade-off:* one conditional UPDATE; concurrent cancels cannot restore stock
-  twice. Exactly one wins, the rest get `409 ORDER_ALREADY_CANCELLED`.
-- **Order creation and cancel intentionally do not write `stock_movements` rows.**
-  *Trade-off:* `last_movement_at` reflects manual adjustments only, not order
-  activity; the order row is the audit record for order-driven stock changes.
-  This keeps the order paths from Part 5a unchanged and avoids mixing two kinds
-  of history. Revisit if the UI needs a unified movement feed.
-- **Delete history guard covers orders too**, via a second `EXISTS` on
-  `sales_order_items`. *Trade-off:* one extra check per delete; otherwise an
-  order-backed product would hit a raw FK violation (500) instead of the
-  documented `409 PRODUCT_HAS_HISTORY`.
-- **`api.ParseID` is shared** by product and order handlers. *Trade-off:* one
-  small shared function instead of two copies that could drift.
-- **Seeds are embedded SQL applied by the API**, not mounted into
-  `/docker-entrypoint-initdb.d`. *Trade-off:* the API must be running before data
-  exists, but schema and seed share the same versioned binary and the SQL is
-  idempotent. Restarting never duplicates rows and there is no second copy of
-  the schema to keep in sync.
-- **Compose uses host ports 5433/8081** via variables. *Trade-off:* non-default
-  ports to remember; avoids colliding with an existing local Postgres or service
-  on 8080, and both are overridable with `PG_PORT` / `API_PORT`.
-- **API waits for a healthy Postgres** through `depends_on: condition: service_healthy`.
-  *Trade-off:* slightly slower startup; avoids crash-looping on a database that
-  is not accepting connections yet.
-- **Vite proxy target is configurable** through `VITE_API_TARGET`. *Trade-off:*
-  one extra env file; the same frontend works against the Compose API or a local
-  `go run` without code edits.
-- **One typed API client, with `ApiError` as the only error shape.** *Trade-off:*
-  a small parsing layer up front; components never parse envelopes or build URLs,
-  so the 409 extras (`available`, `sku`) and 400 `details` reach the UI intact.
-- **Unknown JSON is parsed with type guards**, not casts to `any`. *Trade-off:* a
-  few more lines in `client.ts`; strict TypeScript stays honest and a malformed
-  server response cannot produce a bogus `details` array.
-- **React Router v7** for the three screens. *Trade-off:* one dependency; v6 was
-  available but carried published advisories, so the patched v7 was chosen.
-  Placeholder pages exist now so navigation works before the screens are built.
-- **Summary cards are computed from one full server fetch.** The page calls
-  `GET /api/products` with `limit=100` and follows pages until `total` is covered.
-  *Trade-off:* several requests for a large catalogue, but no extra backend
-  endpoint and the numbers always come from server data.
-- **Search and filters run client-side on the loaded list**, with a 300 ms debounce
-  on the search box. *Trade-off:* no request per keystroke; backend search remains
-  available for other clients.
-- **Styling is deliberately plain CSS because time constraints.** *Trade-off:* no component library or
-  design system; the focus stays on the API contract and data safety.
-- **Order form errors map back to the form.** A 409 uses `err.sku` to highlight the
-  exact row and shows `err.available`. A 400 renders `err.details` as a list.
-  *Trade-off:* a bit of glue in one page; the user sees field-level feedback
-  instead of a generic failure.
-- **Cancel uses a confirm dialog, then refetches the order.** *Trade-off:* one
-  browser dialog; returning to the products page remounts it and reloads stock,
-  so the restore is visible there.
+- Migrations and seed SQL are embedded in the Go binary. This keeps one source of truth for schema and data. A restart cannot apply them twice.
+- `last_movement_at` is derived with a join and a max on the movements table, so there is no second copy of that value to keep in sync.
+- Product search escapes `%`, `_` and `\` before using `ILIKE`. User input stays literal, but a normal index cannot help this query.
+- One error pipeline builds every `{"error": {...}}` body. Unknown errors become `INTERNAL_ERROR` and are logged on the server.
+- Stock uses a conditional `UPDATE` instead of a select followed by an update. The database decides if stock can go down, so concurrent orders cannot oversell.
+- Cancel uses a conditional `UPDATE` on status, so two cancels cannot restore stock twice.
+- Orders do not create movement rows. The order is the record of that stock change. This means `last_movement_at` only reflects manual adjustments.
+- The UI fetches all products with pages of 100 and computes summary cards from that data. It avoids a new endpoint, but a large catalogue would need more requests.
+- Plain CSS is enough here. The API contract and data safety matter more than visual polish.
 
-## Verification (manual)
+## Verification
 
-There is no automated test suite. However, manual verification is done against the running stack.
-Build checks: `go vet ./... && go build ./...` in `backend/`, and
-`npm run build && npm run lint` in `frontend/`.
+There is no automated test suite. We removed it on purpose and verify by hand.
+
+Build checks
 
 ```bash
-docker compose up -d --build
+cd backend
+go vet ./...
+go build ./...
 
+cd ../frontend
+npm run build
+npm run lint
+```
+
+Manual checks with Compose running
+
+```bash
 curl http://localhost:8081/healthz
 curl 'http://localhost:8081/api/products?limit=3'
 curl -i 'http://localhost:8081/api/products?page=0'
-
 curl -X POST http://localhost:8081/api/orders \
   -H 'Content-Type: application/json' \
   -d '{"customer":"Andi","items":[{"sku":"KOP-001","qty":2}]}'
-
-curl -i -X POST http://localhost:8081/api/orders \
-  -H 'Content-Type: application/json' \
-  -d '{"customer":"Andi","items":[{"sku":"TEH-003","qty":99}]}'
-
 curl -X POST http://localhost:8081/api/orders/1/cancel
-curl http://localhost:8081/api/orders/1
 ```
 
-These cover the happy path, validation errors, insufficient stock, cancellation
-and stock restoration end to end.
+I checked list, search, validation, create product, duplicate sku, stock in, stock out, overdraw, movements, order create, short stock on an order, order detail, cancel and seed counts after a restart.
 
-## Improvements / honest hours
+## Time spent
 
-To be filled in at the end.
+I spent 45 minutes on the boilerplates on day one and continued the next day.
+
+- Product list endpoint, migrations and pgx, around an hour
+- Products endpoints themselves, around an hour
+- Stock adjustment and movement history, around an hour
+- Order creation with validation, server prices and atomic decrements, around an hour
+- Cancel and order detail, around 90 minutes
+- Seed data, Compose, manual verification and error handling, around 80 minutes
+- Types, API client and shell, 30 minutes
+- Summary, filters, search and stock adjustment on the UI, 20 minutes
+- Order UI, detail and cancel, 40 minutes
+
+That is 9 hours and 5 minutes in total.
+
+This is the screenshot from the next day only
+
+
+## Future improvements
+
+- Polish the UI more. It is still a simple table and a few forms.
+- Add an `Idempotency-Key` header on `POST /api/orders` so a retry never creates a second order.
+- Put the frontend in Compose as well, so one command runs Postgres, the API and the UI.
+- Add `GET /api/reports/daily-sales?date=` and a summary card on the products page.
+- Add a unique constraint on `order_id` and `sku` in `sales_order_items` as a database level guard against duplicate lines.
+- Add a `pg_trgm` index if search gets slow on a larger catalogue.
+- Record order driven stock changes in `stock_movements` so the movement feed is complete.
