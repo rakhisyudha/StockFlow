@@ -1,4 +1,3 @@
-<img width="438" height="156" alt="Screenshot 2026-11-26 144507" src="https://github.com/user-attachments/assets/957280b8-c349-4510-967f-630fbbc8a6a1" />
 This is a Fullstack technical test from iQuartz
 
 # StockFlow
@@ -162,7 +161,7 @@ This restores every item to stock and returns the cancelled order. A second canc
 
 ## Verification
 
-There is no automated test suite. We removed it on purpose and verify by hand.
+There is no automated test suite. I verify it manually instead.
 
 Build checks
 
@@ -207,6 +206,8 @@ I spent 45 minutes on the boilerplates on day one and continued the next day.
 That is 9 hours and 5 minutes in total.
 
 This is the screenshot from the next day only
+
+
 <img width="438" height="156" alt="Screenshot 2026-11-26 144507" src="https://github.com/user-attachments/assets/56da6b7d-5903-41ca-aa39-cadec6bdeaa5" />
 
 
