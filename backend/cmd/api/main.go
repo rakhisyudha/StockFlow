@@ -11,6 +11,7 @@ import (
 
 	"stockflow/backend/internal/config"
 	"stockflow/backend/internal/db"
+	"stockflow/backend/internal/order"
 	"stockflow/backend/internal/product"
 	"stockflow/backend/internal/server"
 )
@@ -30,9 +31,10 @@ func main() {
 	}
 
 	products := product.NewHandler(product.NewStore(pool))
+	orders := order.NewHandler(order.NewStore(pool))
 	srv := &http.Server{
 		Addr:              cfg.Addr(),
-		Handler:           server.New(products),
+		Handler:           server.New(products, orders),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

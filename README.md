@@ -20,7 +20,7 @@ to `stockflow/` in the layout above.
 
 ## Current state
 
-- `backend/` Go service with product CRUD, stock adjustment and movement history.
+- `backend/` Go service with product CRUD, stock adjustment, movement history and order creation.
 - `frontend/` Vite React-TS scaffold, strict TypeScript, `/api` dev proxy configured.
 - `docker-compose.yml` reserved placeholder, filled in during the Docker part.
 
@@ -30,10 +30,11 @@ to `stockflow/` in the layout above.
 2. **Database + first endpoint** (`GET /api/products`)
 3. **Product write endpoints** (create / update / delete)
 4. **Stock adjustment + movement history**
+5a. **Order creation** (validation, server-side pricing, atomic decrements)
 
 ## Planned parts
 
-5. Order endpoints + transactional stock safety
+5b. Order detail + cancel (stock restore)
 6. Seed data and Docker Compose
 7. Frontend foundations: shared types + API client + error envelope
 8. Frontend: products page, summary cards, adjust-stock modal
@@ -149,6 +150,36 @@ returns `404 PRODUCT_NOT_FOUND`.
 Returns `{"data": [...]}` with movements newest first (`created_at DESC, id DESC`).
 `note` is `null` when omitted.
 
+### `POST /api/orders`
+
+Body: `{"customer":"...","items":[{"sku":"...","qty":n}]}`. Prices are never
+accepted from the client — an `unit_price` field is rejected as unknown.
+
+Validation runs before any write: customer required, at least one item, every qty
+an integer > 0, no duplicate skus, every sku must exist. Problems return
+`400 BAD_REQUEST` with a `details` array, e.g.:
+
+```json
+{"error": {"code": "BAD_REQUEST", "message": "validation failed", "details": ["duplicate sku KOP-001"]}}
+```
+
+`unit_price` is read from `products` and `total` is computed server-side. All
+decrements, the order row and its item rows are written in one transaction. Success
+returns `201` with the order (`status: "CREATED"`, `cancelled_at: null`) and items
+carrying server-computed prices.
+
+```bash
+curl -X POST http://localhost:8080/api/orders \
+  -H 'Content-Type: application/json' \
+  -d '{"customer":"Andi","items":[{"sku":"KOP-001","qty":2},{"sku":"TEH-001","qty":1}]}'
+```
+
+If any item is short, nothing is written and the failing sku is identified:
+
+```json
+{"error": {"code": "INSUFFICIENT_STOCK", "message": "insufficient stock", "sku": "GULA-001", "available": 3}}
+```
+
 ## Design decisions
 
 - **Migrations are embedded in the Go binary** (`//go:embed`) and applied through a
@@ -193,6 +224,17 @@ Returns `{"data": [...]}` with movements newest first (`created_at DESC, id DESC
 - **Stock response carries both the product and the movement.** *Trade-off:* a
   slightly larger body than a bare product; the UI can update stock and history
   from one response instead of a second round trip.
+- **Order validation is two-phase:** shape/duplicates in the handler, existence of
+  all skus via one `WHERE sku = ANY(...)` query in the store — both before any
+  write. *Trade-off:* one extra round trip inside the transaction; gains clear,
+  complete 400 messages and no half-created order.
+- **Order decrements reuse the same guarded UPDATE as manual stock adjustment.**
+  *Trade-off:* duplicated SQL text instead of a shared helper; keeps each store's
+  transaction boundary explicit, and both paths inherit the same non-negative
+  guarantee. A shared helper is the cleanup candidate if a third writer appears.
+- **`DisallowUnknownFields` moved to `api.DecodeJSON`** and is shared by product
+  and order domains. *Trade-off:* strict input contracts; a client-sent
+  `unit_price` or typo'd field fails loudly instead of being silently ignored.
 
 ## Tests
 
@@ -206,7 +248,9 @@ The integration tests use `TRUNCATE`, so point them at a disposable database.
 They cover list/search/validation, create/duplicate sku, update/404, the delete
 history guard, stock happy path, overdraw-with-nothing-written, movement ordering,
 and a 20-goroutine concurrent-decrement test (10 succeed, 10 get 409, stock ends
-at 0 with exactly 10 movements).
+at 0 with exactly 10 movements). Order tests cover all validation rules,
+server-computed totals, overdraw-with-nothing-written (no order, item or movement
+rows) and 20 concurrent orders against stock 10 (10 created, 10 rejected).
 
 `go test -race` additionally checks for Go data races. It needs `CGO_ENABLED=1`
 and a C compiler; this Windows environment has neither gcc nor clang, so it could

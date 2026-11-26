@@ -1,17 +1,13 @@
 package product
 
 import (
-	"encoding/json"
-	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"stockflow/backend/internal/api"
 	"stockflow/backend/internal/apierr"
 )
-
-const maxBodyBytes = 1 << 20
 
 type Input struct {
 	SKU      string `json:"sku"`
@@ -26,21 +22,9 @@ type StockInput struct {
 	Note string `json:"note"`
 }
 
-func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(dst); err != nil {
-		return apierr.BadRequest("invalid JSON body: "+err.Error(), nil)
-	}
-	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return apierr.BadRequest("request body must contain a single JSON object", nil)
-	}
-	return nil
-}
-
 func decodeInput(w http.ResponseWriter, r *http.Request) (Input, error) {
 	var in Input
-	if err := decodeJSON(w, r, &in); err != nil {
+	if err := api.DecodeJSON(w, r, &in); err != nil {
 		return in, err
 	}
 
@@ -64,7 +48,7 @@ func decodeInput(w http.ResponseWriter, r *http.Request) (Input, error) {
 
 func decodeStockInput(w http.ResponseWriter, r *http.Request) (StockInput, error) {
 	var in StockInput
-	if err := decodeJSON(w, r, &in); err != nil {
+	if err := api.DecodeJSON(w, r, &in); err != nil {
 		return in, err
 	}
 

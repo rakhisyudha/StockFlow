@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"stockflow/backend/internal/db"
+	"stockflow/backend/internal/order"
 	"stockflow/backend/internal/product"
 	"stockflow/backend/internal/server"
 )
@@ -32,14 +33,17 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	if err := db.Migrate(ctx, pool); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `TRUNCATE stock_movements, products RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := pool.Exec(ctx, `TRUNCATE sales_order_items, sales_orders, stock_movements, products RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return pool
 }
 
 func testHandler(pool *pgxpool.Pool) http.Handler {
-	return server.New(product.NewHandler(product.NewStore(pool)))
+	return server.New(
+		product.NewHandler(product.NewStore(pool)),
+		order.NewHandler(order.NewStore(pool)),
+	)
 }
 
 func doRequest(t *testing.T, h http.Handler, method, path, body string) *httptest.ResponseRecorder {
