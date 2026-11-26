@@ -21,7 +21,7 @@ to `stockflow/` in the layout above.
 ## Current state
 
 - `backend/` Go service with full product, stock and order lifecycle.
-- `frontend/` shared API types, one API client, app shell with three routes.
+- `frontend/` products page with summary cards, filters and stock adjustment.
 - `docker-compose.yml` brings up Postgres + API with migrations and seed applied.
 
 ## Completed parts
@@ -34,16 +34,16 @@ to `stockflow/` in the layout above.
 5b. **Order detail + cancel** (stock restore)
 6. **Seed data + Docker Compose**
 7. **Frontend foundations** (shared types, API client, app shell)
+8. **Products page** (summary, filters, search, stock adjustment)
 
 ## Planned parts
 
-8. Frontend: products page, summary cards, adjust-stock modal
 9. Frontend: create order + order detail/cancel flows
 10. Docs polish and final verification
 
 ## How to run
 
-### Option A — one command (Docker)
+### Option A: one command (Docker)
 
 ```bash
 docker compose up -d --build
@@ -62,7 +62,7 @@ curl http://localhost:8081/healthz
 curl 'http://localhost:8081/api/products?limit=3'
 ```
 
-### Option B — local processes
+### Option B: local processes
 
 ```bash
 # any reachable Postgres; on a fresh DB migrations + seed run at startup
@@ -85,7 +85,7 @@ Seed SQL is idempotent, so restarting the API does not duplicate rows.
 ### `GET /api/products`
 
 Query parameters: `search` (matches `sku` or `name`, case-insensitive, literal
-`%`, `_` and `\` are escaped), `page` (>= 1, default 1), `limit` (1–100, default 20).
+`%`, `_` and `\` are escaped), `page` (>= 1, default 1), `limit` (1 to 100, default 20).
 
 ```bash
 curl 'http://localhost:8081/api/products?search=kopi&page=1&limit=20'
@@ -167,7 +167,7 @@ Overdraw returns `409`:
 {"error": {"code": "INSUFFICIENT_STOCK", "message": "insufficient stock", "available": 2}}
 ```
 
-Nothing is written on that path — no movement row, no stock change. Missing product
+Nothing is written on that path: no movement row and no stock change. Missing product
 returns `404 PRODUCT_NOT_FOUND`.
 
 ### `GET /api/products/{id}/movements`
@@ -178,7 +178,7 @@ Returns `{"data": [...]}` with movements newest first (`created_at DESC, id DESC
 ### `POST /api/orders`
 
 Body: `{"customer":"...","items":[{"sku":"...","qty":n}]}`. Prices are never
-accepted from the client — an `unit_price` field is rejected as unknown.
+accepted from the client. A `unit_price` field is rejected as unknown.
 
 Validation runs before any write: customer required, at least one item, every qty
 an integer > 0, no duplicate skus, every sku must exist. Problems return
@@ -223,13 +223,16 @@ curl -X POST http://localhost:8081/api/orders/1/cancel
 
 ## Frontend architecture
 
-- `src/api/types.ts` — every server shape in one module; domain data is typed, never `any`.
-- `src/api/client.ts` — the only place that calls `fetch` or builds a URL. It returns
+- `src/api/types.ts` holds every server shape in one module. Domain data is typed, never `any`.
+- `src/api/client.ts` is the only place that calls `fetch` or builds a URL. It returns
   typed results and throws `ApiError` for every non-2xx response.
-- `src/lib/format.ts` — `formatPrice` (`Rp 1.234.567`) and `formatRelativeTime`
-  (`2h ago`) shared by the pages.
-- `src/components/AppShell.tsx` plus `src/pages/` — routes `/`, `/orders/new` and
+- `src/lib/format.ts` holds `formatPrice` (`Rp 1.234.567`) and `formatRelativeTime`
+  (`2h ago`), shared by the pages.
+- `src/components/AppShell.tsx` and `src/pages/` define routes `/`, `/orders/new` and
   `/orders/:id`.
+- `src/pages/ProductsPage.tsx` loads products and renders `SummaryCards`,
+  `ProductTable` and `AdjustStockModal`. Search and filters are client-side over
+  the loaded list.
 
 ## Design decisions
 
@@ -252,7 +255,7 @@ curl -X POST http://localhost:8081/api/orders/1/cancel
 - **Fixed package pattern:** every domain gets `model + store + handler` in its own
   package, wired by `cmd/api`, routed by `internal/server`. *Trade-off:* more files
   than a flat design, but predictable navigation and clear ownership per endpoint.
-- **Bounded pool and paging:** `pgxpool` capped at 1–10 connections and `limit`
+- **Bounded pool and paging:** `pgxpool` capped at 1 to 10 connections and `limit`
   capped at 100. *Trade-off:* strict 400s for bad parameters instead of silent
   coercion, which prevents accidental unbounded scans.
 - **One shared input decoder** for create/update: trims strings, rejects unknown
@@ -276,7 +279,7 @@ curl -X POST http://localhost:8081/api/orders/1/cancel
   slightly larger body than a bare product; the UI can update stock and history
   from one response instead of a second round trip.
 - **Order validation is two-phase:** shape/duplicates in the handler, existence of
-  all skus via one `WHERE sku = ANY(...)` query in the store — both before any
+  all skus via one `WHERE sku = ANY(...)` query in the store. Both run before any
   write. *Trade-off:* one extra round trip inside the transaction; gains clear,
   complete 400 messages and no half-created order.
 - **Order decrements reuse the same guarded UPDATE as manual stock adjustment.**
@@ -288,7 +291,7 @@ curl -X POST http://localhost:8081/api/orders/1/cancel
   `unit_price` or typo'd field fails loudly instead of being silently ignored.
 - **Cancel is guarded by `WHERE status = 'CREATED'`**, not a read-then-write.
   *Trade-off:* one conditional UPDATE; concurrent cancels cannot restore stock
-  twice — exactly one wins, the rest get `409 ORDER_ALREADY_CANCELLED`.
+  twice. Exactly one wins, the rest get `409 ORDER_ALREADY_CANCELLED`.
 - **Order creation and cancel intentionally do not write `stock_movements` rows.**
   *Trade-off:* `last_movement_at` reflects manual adjustments only, not order
   activity; the order row is the audit record for order-driven stock changes.
@@ -303,7 +306,7 @@ curl -X POST http://localhost:8081/api/orders/1/cancel
 - **Seeds are embedded SQL applied by the API**, not mounted into
   `/docker-entrypoint-initdb.d`. *Trade-off:* the API must be running before data
   exists, but schema and seed share the same versioned binary and the SQL is
-  idempotent — restarting never duplicates rows and there is no second copy of
+  idempotent. Restarting never duplicates rows and there is no second copy of
   the schema to keep in sync.
 - **Compose uses host ports 5433/8081** via variables. *Trade-off:* non-default
   ports to remember; avoids colliding with an existing local Postgres or service
@@ -323,6 +326,15 @@ curl -X POST http://localhost:8081/api/orders/1/cancel
 - **React Router v7** for the three screens. *Trade-off:* one dependency; v6 was
   available but carried published advisories, so the patched v7 was chosen.
   Placeholder pages exist now so navigation works before the screens are built.
+- **Summary cards are computed from one full server fetch.** The page calls
+  `GET /api/products` with `limit=100` and follows pages until `total` is covered.
+  *Trade-off:* several requests for a large catalogue, but no extra backend
+  endpoint and the numbers always come from server data.
+- **Search and filters run client-side on the loaded list**, with a 300 ms debounce
+  on the search box. *Trade-off:* no request per keystroke; backend search remains
+  available for other clients.
+- **Styling is deliberately plain CSS.** *Trade-off:* no component library or
+  design system; the focus stays on the API contract and data safety.
 
 ## Verification (manual)
 

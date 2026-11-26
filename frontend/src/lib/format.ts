@@ -3,9 +3,9 @@ export function formatPrice(value: number): string {
 }
 
 export function formatRelativeTime(iso: string | null): string {
-  if (!iso) return '—'
+  if (!iso) return '-'
   const elapsed = Date.now() - new Date(iso).getTime()
-  if (!Number.isFinite(elapsed) || elapsed < 0) return '—'
+  if (!Number.isFinite(elapsed) || elapsed < 0) return '-'
 
   const minutes = Math.floor(elapsed / 60_000)
   if (minutes < 1) return 'just now'
