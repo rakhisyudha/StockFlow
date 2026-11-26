@@ -21,7 +21,7 @@ to `stockflow/` in the layout above.
 ## Current state
 
 - `backend/` Go service with full product, stock and order lifecycle.
-- `frontend/` products page with summary cards, filters and stock adjustment.
+- `frontend/` full product, stock and order screens.
 - `docker-compose.yml` brings up Postgres + API with migrations and seed applied.
 
 ## Completed parts
@@ -35,10 +35,10 @@ to `stockflow/` in the layout above.
 6. **Seed data + Docker Compose**
 7. **Frontend foundations** (shared types, API client, app shell)
 8. **Products page** (summary, filters, search, stock adjustment)
+9. **Order screens** (create order, detail, cancel)
 
 ## Planned parts
 
-9. Frontend: create order + order detail/cancel flows
 10. Docs polish and final verification
 
 ## How to run
@@ -233,6 +233,10 @@ curl -X POST http://localhost:8081/api/orders/1/cancel
 - `src/pages/ProductsPage.tsx` loads products and renders `SummaryCards`,
   `ProductTable` and `AdjustStockModal`. Search and filters are client-side over
   the loaded list.
+- `src/pages/NewOrderPage.tsx` manages a customer name and a list of SKU/qty rows,
+  then navigates to the created order.
+- `src/pages/OrderDetailPage.tsx` shows order items, status and total, and handles
+  cancellation after a confirm dialog.
 
 ## Design decisions
 
@@ -333,8 +337,15 @@ curl -X POST http://localhost:8081/api/orders/1/cancel
 - **Search and filters run client-side on the loaded list**, with a 300 ms debounce
   on the search box. *Trade-off:* no request per keystroke; backend search remains
   available for other clients.
-- **Styling is deliberately plain CSS.** *Trade-off:* no component library or
+- **Styling is deliberately plain CSS because time constraints.** *Trade-off:* no component library or
   design system; the focus stays on the API contract and data safety.
+- **Order form errors map back to the form.** A 409 uses `err.sku` to highlight the
+  exact row and shows `err.available`. A 400 renders `err.details` as a list.
+  *Trade-off:* a bit of glue in one page; the user sees field-level feedback
+  instead of a generic failure.
+- **Cancel uses a confirm dialog, then refetches the order.** *Trade-off:* one
+  browser dialog; returning to the products page remounts it and reloads stock,
+  so the restore is visible there.
 
 ## Verification (manual)
 

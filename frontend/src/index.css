@@ -248,3 +248,82 @@ button:disabled {
   gap: 0.5rem;
   margin-top: 0.5rem;
 }
+
+.form-grid {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 32rem;
+}
+
+.form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.form-lines {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr auto;
+  gap: 0.5rem;
+  align-items: end;
+  padding: 0.5rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.4rem;
+}
+
+.form-row.row-error {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+
+.inline-error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #b91c1c;
+  font-size: 0.8rem;
+}
+
+.error ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.list-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.order-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  margin: 1rem 0;
+}
+
+.order-meta div {
+  display: flex;
+  flex-direction: column;
+}
+
+.order-meta span {
+  color: #6b7280;
+  font-size: 0.8rem;
+}
+
+.status-cancelled {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}

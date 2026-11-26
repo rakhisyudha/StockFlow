@@ -10,7 +10,6 @@ export function AppShell({ children }: AppShellProps) {
     <div className="app-shell">
       <header className="app-header">
         <div className="brand">
-          <span className="brand-mark">SF</span>
           <span className="brand-text">
             <strong>StockFlow</strong>
             <small>Warehouse manager</small>
