@@ -4,34 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
-	"os"
 	"testing"
 
-	"stockflow/backend/internal/db"
 	"stockflow/backend/internal/product"
-	"stockflow/backend/internal/server"
 )
 
 func TestListProducts(t *testing.T) {
-	url := os.Getenv("DATABASE_URL")
-	if url == "" {
-		t.Skip("DATABASE_URL is not set")
-	}
-
+	pool := testPool(t)
 	ctx := context.Background()
-	pool, err := db.Connect(ctx, url)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	defer pool.Close()
-	if err := db.Migrate(ctx, pool); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
 
-	if _, err := pool.Exec(ctx, `TRUNCATE stock_movements, products RESTART IDENTITY CASCADE`); err != nil {
-		t.Fatalf("truncate: %v", err)
-	}
 	if _, err := pool.Exec(ctx, `INSERT INTO products (sku, name, price, stock) VALUES
 		('KOP-001', 'Kopi Arabika', 25000, 50),
 		('TEH-001', 'Teh Hijau', 15000, 5)`); err != nil {
@@ -41,7 +22,7 @@ func TestListProducts(t *testing.T) {
 		t.Fatalf("seed movement: %v", err)
 	}
 
-	handler := server.New(product.NewHandler(product.NewStore(pool)))
+	handler := testHandler(pool)
 
 	tests := []struct {
 		name       string
@@ -59,8 +40,7 @@ func TestListProducts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.path, nil))
+			rec := doRequest(t, handler, http.MethodGet, tt.path, "")
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d; body = %s", rec.Code, tt.wantStatus, rec.Body.String())
 			}

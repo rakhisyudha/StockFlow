@@ -20,7 +20,7 @@ to `stockflow/` in the layout above.
 
 ## Current state
 
-- `backend/` Go service with `GET /healthz` and `GET /api/products`.
+- `backend/` Go service with product list/create/update/delete endpoints.
 - `frontend/` Vite React-TS scaffold, strict TypeScript, `/api` dev proxy configured.
 - `docker-compose.yml` reserved placeholder, filled in during the Docker part.
 
@@ -28,17 +28,18 @@ to `stockflow/` in the layout above.
 
 1. **Boilerplate**
 2. **Database + first endpoint** (`GET /api/products`)
+3. **Product write endpoints** (create / update / delete)
 
 ## Planned parts
 
-3. Remaining product endpoints (create / update / delete / stock / movements)
-4. Order endpoints + transactional stock safety
-5. Seed data and Docker Compose
-6. Backend concurrency tests
-7. Frontend foundations: shared types + API client + error envelope
-8. Frontend: products page, summary cards, adjust-stock modal
-9. Frontend: create order + order detail/cancel flows
-10. Frontend unit tests, docs polish, final verification
+4. Stock adjustment + movement history
+5. Order endpoints + transactional stock safety
+6. Seed data and Docker Compose
+7. Backend concurrency tests
+8. Frontend foundations: shared types + API client + error envelope
+9. Frontend: products page, summary cards, adjust-stock modal
+10. Frontend: create order + order detail/cancel flows
+11. Frontend unit tests, docs polish, final verification
 
 ## How to run
 
@@ -91,6 +92,37 @@ Invalid paging returns `400` with the shared error envelope:
 {"error": {"code": "BAD_REQUEST", "message": "limit must be an integer between 1 and 100"}}
 ```
 
+### `POST /api/products`
+
+Body: `{"sku":"...","name":"...","price":n,"is_active":true}`. `sku` and `name` are
+required after trimming, `price` must be an integer >= 0, `is_active` defaults to
+`true`. Unknown fields are rejected with `400 BAD_REQUEST`; field problems are
+returned as `{"error":{"code":"BAD_REQUEST","message":"validation failed","details":[...]}}`.
+A duplicate sku returns `409 SKU_ALREADY_EXISTS` with `{"sku":"..."}`. Success is
+`201` with the created product (`stock: 0`, `last_movement_at: null`).
+
+```bash
+curl -X POST http://localhost:8080/api/products \
+  -H 'Content-Type: application/json' \
+  -d '{"sku":"KOP-002","name":"Kopi Robusta","price":18000}'
+```
+
+### `PUT /api/products/{id}`
+
+Same body as create. `is_active` may be omitted to keep the current value.
+Returns `200` with the updated product, `404 PRODUCT_NOT_FOUND` when missing,
+or the same validation/duplicate errors as create.
+
+### `DELETE /api/products/{id}`
+
+Returns `204` with an empty body, `404 PRODUCT_NOT_FOUND` when missing, or
+`409 PRODUCT_HAS_HISTORY` when any movement references the product. History is
+never deleted.
+
+```bash
+curl -i -X DELETE http://localhost:8080/api/products/1
+```
+
 ## Design decisions
 
 - **Migrations are embedded in the Go binary** (`//go:embed`) and applied through a
@@ -115,6 +147,17 @@ Invalid paging returns `400` with the shared error envelope:
 - **Bounded pool and paging:** `pgxpool` capped at 1–10 connections and `limit`
   capped at 100. *Trade-off:* strict 400s for bad parameters instead of silent
   coercion, which prevents accidental unbounded scans.
+- **One shared input decoder** for create/update: trims strings, rejects unknown
+  fields, and collects validation problems into `details`. *Trade-off:* stricter
+  than a permissive decoder (a typo'd field is a 400), but bad writes cannot slip
+  through and both endpoints cannot drift apart.
+- **Uniqueness is enforced by the DB constraint**, then the `23505` error is mapped
+  to `409 SKU_ALREADY_EXISTS`. *Trade-off:* a pre-check would be simpler to read but
+  racy; the constraint is the single source of truth.
+- **Delete guards inside one transaction** with `SELECT ... FOR UPDATE` on the
+  product row before checking movement history. *Trade-off:* one short lock per
+  delete; prevents a concurrent movement from slipping in between the check and
+  the delete, which would orphan history.
 
 ## Tests
 
@@ -124,7 +167,8 @@ go test ./...                                   # unit tests; DB test skips
 DATABASE_URL='postgres://...' go test ./... -count=1   # + httptest integration
 ```
 
-The integration test uses `TRUNCATE`, so point it at a disposable database.
+The integration tests use `TRUNCATE`, so point them at a disposable database.
+They cover create/validation/duplicate sku, update/404, and the delete history guard.
 
 ## Improvements / honest hours
 

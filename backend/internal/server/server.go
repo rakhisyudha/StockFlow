@@ -11,6 +11,9 @@ func New(products *product.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
 	mux.HandleFunc("GET /api/products", products.List)
+	mux.HandleFunc("POST /api/products", products.Create)
+	mux.HandleFunc("PUT /api/products/{id}", products.Update)
+	mux.HandleFunc("DELETE /api/products/{id}", products.Delete)
 	return mux
 }
 

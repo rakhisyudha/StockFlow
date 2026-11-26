@@ -25,3 +25,51 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	api.WriteJSON(w, http.StatusOK, result)
 }
+
+func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	in, err := decodeInput(w, r)
+	if err != nil {
+		api.WriteError(w, err)
+		return
+	}
+
+	p, err := h.store.Create(r.Context(), in)
+	if err != nil {
+		api.WriteError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusCreated, p)
+}
+
+func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		api.WriteError(w, err)
+		return
+	}
+	in, err := decodeInput(w, r)
+	if err != nil {
+		api.WriteError(w, err)
+		return
+	}
+
+	p, err := h.store.Update(r.Context(), id, in)
+	if err != nil {
+		api.WriteError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, p)
+}
+
+func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	id, err := parseID(r)
+	if err != nil {
+		api.WriteError(w, err)
+		return
+	}
+	if err := h.store.Delete(r.Context(), id); err != nil {
+		api.WriteError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
