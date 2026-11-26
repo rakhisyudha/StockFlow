@@ -1,22 +1,19 @@
 package server
 
 import (
-	"encoding/json"
 	"net/http"
+
+	"stockflow/backend/internal/api"
+	"stockflow/backend/internal/product"
 )
 
-func New() http.Handler {
+func New(products *product.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
+	mux.HandleFunc("GET /api/products", products.List)
 	return mux
 }
 
 func healthz(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	api.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

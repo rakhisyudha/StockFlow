@@ -10,19 +10,33 @@ import (
 	"time"
 
 	"stockflow/backend/internal/config"
+	"stockflow/backend/internal/db"
+	"stockflow/backend/internal/product"
 	"stockflow/backend/internal/server"
 )
 
 func main() {
 	cfg := config.Load()
+	ctx := context.Background()
 
+	pool, err := db.Connect(ctx, cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("database: %v", err)
+	}
+	defer pool.Close()
+
+	if err := db.Migrate(ctx, pool); err != nil {
+		log.Fatalf("migrate: %v", err)
+	}
+
+	products := product.NewHandler(product.NewStore(pool))
 	srv := &http.Server{
 		Addr:              cfg.Addr(),
-		Handler:           server.New(),
+		Handler:           server.New(products),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	shutdownCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	go func() {
@@ -32,12 +46,12 @@ func main() {
 		}
 	}()
 
-	<-ctx.Done()
+	<-shutdownCtx.Done()
 	stop()
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	if err := srv.Shutdown(timeoutCtx); err != nil {
 		log.Printf("graceful shutdown failed: %v", err)
 	}
 	log.Println("stockflow api stopped")
