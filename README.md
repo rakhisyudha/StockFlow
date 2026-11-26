@@ -21,7 +21,7 @@ to `stockflow/` in the layout above.
 ## Current state
 
 - `backend/` Go service with full product, stock and order lifecycle.
-- `frontend/` Vite React-TS scaffold, strict TypeScript, configurable `/api` dev proxy.
+- `frontend/` shared API types, one API client, app shell with three routes.
 - `docker-compose.yml` brings up Postgres + API with migrations and seed applied.
 
 ## Completed parts
@@ -33,10 +33,10 @@ to `stockflow/` in the layout above.
 5a. **Order creation** (validation, server-side pricing, atomic decrements)
 5b. **Order detail + cancel** (stock restore)
 6. **Seed data + Docker Compose**
+7. **Frontend foundations** (shared types, API client, app shell)
 
 ## Planned parts
 
-7. Frontend foundations: shared types + API client + error envelope
 8. Frontend: products page, summary cards, adjust-stock modal
 9. Frontend: create order + order detail/cancel flows
 10. Docs polish and final verification
@@ -221,6 +221,16 @@ leaves the order active.
 curl -X POST http://localhost:8081/api/orders/1/cancel
 ```
 
+## Frontend architecture
+
+- `src/api/types.ts` — every server shape in one module; domain data is typed, never `any`.
+- `src/api/client.ts` — the only place that calls `fetch` or builds a URL. It returns
+  typed results and throws `ApiError` for every non-2xx response.
+- `src/lib/format.ts` — `formatPrice` (`Rp 1.234.567`) and `formatRelativeTime`
+  (`2h ago`) shared by the pages.
+- `src/components/AppShell.tsx` plus `src/pages/` — routes `/`, `/orders/new` and
+  `/orders/:id`.
+
 ## Design decisions
 
 - **Migrations are embedded in the Go binary** (`//go:embed`) and applied through a
@@ -304,10 +314,19 @@ curl -X POST http://localhost:8081/api/orders/1/cancel
 - **Vite proxy target is configurable** through `VITE_API_TARGET`. *Trade-off:*
   one extra env file; the same frontend works against the Compose API or a local
   `go run` without code edits.
+- **One typed API client, with `ApiError` as the only error shape.** *Trade-off:*
+  a small parsing layer up front; components never parse envelopes or build URLs,
+  so the 409 extras (`available`, `sku`) and 400 `details` reach the UI intact.
+- **Unknown JSON is parsed with type guards**, not casts to `any`. *Trade-off:* a
+  few more lines in `client.ts`; strict TypeScript stays honest and a malformed
+  server response cannot produce a bogus `details` array.
+- **React Router v7** for the three screens. *Trade-off:* one dependency; v6 was
+  available but carried published advisories, so the patched v7 was chosen.
+  Placeholder pages exist now so navigation works before the screens are built.
 
 ## Verification (manual)
 
-There is no automated test suite; verification is done against the running stack.
+There is no automated test suite. However, manual verification is done against the running stack.
 Build checks: `go vet ./... && go build ./...` in `backend/`, and
 `npm run build && npm run lint` in `frontend/`.
 
