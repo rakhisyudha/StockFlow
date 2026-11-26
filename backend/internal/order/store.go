@@ -110,6 +110,72 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Order, error) {
 	return s.Get(ctx, orderID)
 }
 
+func (s *Store) Cancel(ctx context.Context, id int) (Order, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return Order{}, fmt.Errorf("begin cancel: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var status string
+	err = tx.QueryRow(ctx,
+		`UPDATE sales_orders SET status = 'CANCELLED', cancelled_at = now()
+		 WHERE id = $1 AND status = 'CREATED' RETURNING status`, id,
+	).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM sales_orders WHERE id = $1)`, id).Scan(&exists); err != nil {
+			return Order{}, fmt.Errorf("check order: %w", err)
+		}
+		if !exists {
+			return Order{}, apierr.NotFound("ORDER_NOT_FOUND", "order not found")
+		}
+		return Order{}, apierr.Conflict("ORDER_ALREADY_CANCELLED", "order already cancelled", nil)
+	}
+	if err != nil {
+		return Order{}, fmt.Errorf("cancel order: %w", err)
+	}
+
+	rows, err := tx.Query(ctx, `SELECT sku, qty FROM sales_order_items WHERE order_id = $1`, id)
+	if err != nil {
+		return Order{}, fmt.Errorf("load order items: %w", err)
+	}
+	type restore struct {
+		sku string
+		qty int
+	}
+	restores := make([]restore, 0)
+	for rows.Next() {
+		var r restore
+		if err := rows.Scan(&r.sku, &r.qty); err != nil {
+			rows.Close()
+			return Order{}, fmt.Errorf("scan order item: %w", err)
+		}
+		restores = append(restores, r)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return Order{}, fmt.Errorf("iterate order items: %w", err)
+	}
+	rows.Close()
+
+	for _, r := range restores {
+		var stock int
+		err := tx.QueryRow(ctx, `UPDATE products SET stock = stock + $2 WHERE sku = $1 RETURNING stock`, r.sku, r.qty).Scan(&stock)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return Order{}, apierr.NotFound("PRODUCT_NOT_FOUND", "product not found")
+		}
+		if err != nil {
+			return Order{}, fmt.Errorf("restore stock: %w", err)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return Order{}, fmt.Errorf("commit cancel: %w", err)
+	}
+
+	return s.Get(ctx, id)
+}
+
 func (s *Store) Get(ctx context.Context, id int) (Order, error) {
 	var o Order
 	err := s.db.QueryRow(ctx,

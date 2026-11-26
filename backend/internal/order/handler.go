@@ -24,3 +24,33 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	api.WriteJSON(w, http.StatusCreated, o)
 }
+
+func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
+	id, err := api.ParseID(r)
+	if err != nil {
+		api.WriteError(w, err)
+		return
+	}
+
+	o, err := h.store.Get(r.Context(), id)
+	if err != nil {
+		api.WriteError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, o)
+}
+
+func (h *Handler) Cancel(w http.ResponseWriter, r *http.Request) {
+	id, err := api.ParseID(r)
+	if err != nil {
+		api.WriteError(w, err)
+		return
+	}
+
+	o, err := h.store.Cancel(r.Context(), id)
+	if err != nil {
+		api.WriteError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, o)
+}

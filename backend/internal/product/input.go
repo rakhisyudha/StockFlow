@@ -2,7 +2,6 @@ package product
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 
 	"stockflow/backend/internal/api"
@@ -63,12 +62,4 @@ func decodeStockInput(w http.ResponseWriter, r *http.Request) (StockInput, error
 		return in, apierr.BadRequest("validation failed", map[string]any{"details": details})
 	}
 	return in, nil
-}
-
-func parseID(r *http.Request) (int, error) {
-	id, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil || id < 1 {
-		return 0, apierr.BadRequest("id must be a positive integer", nil)
-	}
-	return id, nil
 }

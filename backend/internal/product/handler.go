@@ -42,7 +42,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
-	id, err := parseID(r)
+	id, err := api.ParseID(r)
 	if err != nil {
 		api.WriteError(w, err)
 		return
@@ -62,7 +62,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
-	id, err := parseID(r)
+	id, err := api.ParseID(r)
 	if err != nil {
 		api.WriteError(w, err)
 		return
@@ -75,7 +75,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) AdjustStock(w http.ResponseWriter, r *http.Request) {
-	id, err := parseID(r)
+	id, err := api.ParseID(r)
 	if err != nil {
 		api.WriteError(w, err)
 		return
@@ -95,7 +95,7 @@ func (h *Handler) AdjustStock(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Movements(w http.ResponseWriter, r *http.Request) {
-	id, err := parseID(r)
+	id, err := api.ParseID(r)
 	if err != nil {
 		api.WriteError(w, err)
 		return

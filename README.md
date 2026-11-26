@@ -20,7 +20,7 @@ to `stockflow/` in the layout above.
 
 ## Current state
 
-- `backend/` Go service with product CRUD, stock adjustment, movement history and order creation.
+- `backend/` Go service with full product, stock and order lifecycle.
 - `frontend/` Vite React-TS scaffold, strict TypeScript, `/api` dev proxy configured.
 - `docker-compose.yml` reserved placeholder, filled in during the Docker part.
 
@@ -31,10 +31,10 @@ to `stockflow/` in the layout above.
 3. **Product write endpoints** (create / update / delete)
 4. **Stock adjustment + movement history**
 5a. **Order creation** (validation, server-side pricing, atomic decrements)
+5b. **Order detail + cancel** (stock restore)
 
 ## Planned parts
 
-5b. Order detail + cancel (stock restore)
 6. Seed data and Docker Compose
 7. Frontend foundations: shared types + API client + error envelope
 8. Frontend: products page, summary cards, adjust-stock modal
@@ -180,6 +180,22 @@ If any item is short, nothing is written and the failing sku is identified:
 {"error": {"code": "INSUFFICIENT_STOCK", "message": "insufficient stock", "sku": "GULA-001", "available": 3}}
 ```
 
+### `GET /api/orders/{id}`
+
+Returns the order with items, status, total and `cancelled_at`. `404 ORDER_NOT_FOUND`
+when missing, `400 BAD_REQUEST` for a non-numeric id.
+
+### `POST /api/orders/{id}/cancel`
+
+Restores every item's quantity to stock and returns `200` with the cancelled order.
+`409 ORDER_ALREADY_CANCELLED` on a second cancel, `404 ORDER_NOT_FOUND` when missing.
+The status change and all restores are in one transaction, so a failed restore
+leaves the order active.
+
+```bash
+curl -X POST http://localhost:8080/api/orders/1/cancel
+```
+
 ## Design decisions
 
 - **Migrations are embedded in the Go binary** (`//go:embed`) and applied through a
@@ -235,6 +251,20 @@ If any item is short, nothing is written and the failing sku is identified:
 - **`DisallowUnknownFields` moved to `api.DecodeJSON`** and is shared by product
   and order domains. *Trade-off:* strict input contracts; a client-sent
   `unit_price` or typo'd field fails loudly instead of being silently ignored.
+- **Cancel is guarded by `WHERE status = 'CREATED'`**, not a read-then-write.
+  *Trade-off:* one conditional UPDATE; concurrent cancels cannot restore stock
+  twice — exactly one wins, the rest get `409 ORDER_ALREADY_CANCELLED`.
+- **Order creation and cancel intentionally do not write `stock_movements` rows.**
+  *Trade-off:* `last_movement_at` reflects manual adjustments only, not order
+  activity; the order row is the audit record for order-driven stock changes.
+  This keeps the order paths from Part 5a unchanged and avoids mixing two kinds
+  of history. Revisit if the UI needs a unified movement feed.
+- **Delete history guard covers orders too**, via a second `EXISTS` on
+  `sales_order_items`. *Trade-off:* one extra check per delete; otherwise an
+  order-backed product would hit a raw FK violation (500) instead of the
+  documented `409 PRODUCT_HAS_HISTORY`.
+- **`api.ParseID` is shared** by product and order handlers. *Trade-off:* one
+  small shared function instead of two copies that could drift.
 
 ## Tests
 
@@ -251,6 +281,9 @@ and a 20-goroutine concurrent-decrement test (10 succeed, 10 get 409, stock ends
 at 0 with exactly 10 movements). Order tests cover all validation rules,
 server-computed totals, overdraw-with-nothing-written (no order, item or movement
 rows) and 20 concurrent orders against stock 10 (10 created, 10 rejected).
+Order detail/cancel tests cover exact stock restoration, double-cancel 409,
+missing order 404, 20 concurrent cancels restoring exactly once, and the delete
+guard for order-backed products.
 
 `go test -race` additionally checks for Go data races. It needs `CGO_ENABLED=1`
 and a C compiler; this Windows environment has neither gcc nor clang, so it could

@@ -147,7 +147,9 @@ func (s *Store) Delete(ctx context.Context, id int) error {
 	}
 
 	var hasHistory bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM stock_movements WHERE product_id = $1)`, id).Scan(&hasHistory); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT
+		EXISTS (SELECT 1 FROM stock_movements WHERE product_id = $1)
+		OR EXISTS (SELECT 1 FROM sales_order_items WHERE sku = (SELECT sku FROM products WHERE id = $1))`, id).Scan(&hasHistory); err != nil {
 		return fmt.Errorf("check history: %w", err)
 	}
 	if hasHistory {

@@ -18,6 +18,8 @@ func New(products *product.Handler, orders *order.Handler) http.Handler {
 	mux.HandleFunc("POST /api/products/{id}/stock", products.AdjustStock)
 	mux.HandleFunc("GET /api/products/{id}/movements", products.Movements)
 	mux.HandleFunc("POST /api/orders", orders.Create)
+	mux.HandleFunc("GET /api/orders/{id}", orders.Get)
+	mux.HandleFunc("POST /api/orders/{id}/cancel", orders.Cancel)
 	return mux
 }
 
